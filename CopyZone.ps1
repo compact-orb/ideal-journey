@@ -55,6 +55,70 @@ if (-not (Test-Path -Path $LocalCachePath)) {
     New-Item -Path $LocalCachePath -ItemType Directory | Out-Null
 }
 
+function Test-BunnyZoneRead {
+    param (
+        [string]$ZoneName,
+        [string]$AccessKey,
+        [string]$Endpoint
+    )
+
+    Write-Output -InputObject "Validating read access for zone: $ZoneName..."
+    $Uri = "https://$Endpoint/$ZoneName/"
+    try {
+        Invoke-RestMethod -Uri $Uri -Headers @{ "accept" = "application/json"; "AccessKey" = $AccessKey } -Method GET | Out-Null
+        Write-Output -InputObject "Read access validation successful for zone: $ZoneName"
+    }
+    catch {
+        throw "Failed to validate read access for zone $ZoneName : $_"
+    }
+}
+
+function Test-BunnyZoneWrite {
+    param (
+        [string]$ZoneName,
+        [string]$AccessKey,
+        [string]$Endpoint
+    )
+
+    Write-Output -InputObject "Validating write access for zone: $ZoneName..."
+    
+    $TestFileName = "validation-test-$([guid]::NewGuid()).txt"
+    $TestContent = -join ((65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+    $Uri = "https://$Endpoint/$ZoneName/$TestFileName"
+    $Headers = @{ "accept" = "application/json"; "AccessKey" = $AccessKey }
+
+    try {
+        # 1. Upload Test File
+        Invoke-RestMethod -Uri $Uri -Headers $Headers -Method PUT -Body $TestContent -ContentType "text/plain" | Out-Null
+        
+        # 2. Verify Content (Read)
+        $DownloadedContent = Invoke-RestMethod -Uri $Uri -Headers $Headers -Method GET
+        if ($DownloadedContent -ne $TestContent) {
+            throw "Content verification failed for zone $ZoneName"
+        }
+
+        Write-Output -InputObject "Write access validation successful for zone: $ZoneName"
+    }
+    catch {
+        throw "Failed to validate write access for zone $ZoneName : $_"
+    }
+    finally {
+        # 3. Cleanup (Delete) - Attempt even if previous steps failed
+        try {
+            Invoke-RestMethod -Uri $Uri -Headers $Headers -Method DELETE | Out-Null
+        }
+        catch {
+            Write-Warning -Message "Failed to clean up validation file $TestFileName in zone $ZoneName : $_"
+        }
+    }
+}
+
+# Validate Source Zone (Read)
+Test-BunnyZoneRead -ZoneName $SourceZoneName -AccessKey $SourceAccessKey -Endpoint $SourceEndpoint
+
+# Validate Destination Zone (Write)
+Test-BunnyZoneWrite -ZoneName $DestinationZoneName -AccessKey $DestinationAccessKey -Endpoint $DestinationEndpoint
+
 Write-Output -InputObject "Starting download from source zone: $SourceZoneName"
 
 # --- Download Phase ---
