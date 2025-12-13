@@ -198,43 +198,35 @@ do {
     }
 } while (![string]::IsNullOrWhiteSpace($Directories))
 
-# Download all collected files in parallel
+# Transfer files in parallel (Download -> Upload -> Delete)
 if ($FilesToDownload.Count -gt 0) {
+    Write-Output -InputObject "Starting transfer of $($FilesToDownload.Count) files..."
+    
     $FilesToDownload | ForEach-Object -Parallel {
         $FileObj = $_
-        Write-Output -InputObject "Downloading $($FileObj.Path) to $($FileObj.LocalPath)"
-
-        # Download the file from Bunny Storage
-        $Uri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
-        Invoke-WebRequest -Uri $Uri -Headers @{ accept = '*/*'; AccessKey = $using:SourceAccessKey } -OutFile $FileObj.LocalPath
+        $SourceUri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
+        $DestUri = "https://$using:DestinationEndpoint/$using:DestinationZoneName$($FileObj.Path)"
+        
+        try {
+            # 1. Download
+            Write-Output -InputObject "Downloading $($FileObj.Path)..."
+            Invoke-WebRequest -Uri $SourceUri -Headers @{ accept = '*/*'; AccessKey = $using:SourceAccessKey } -OutFile $FileObj.LocalPath
+            
+            # 2. Upload
+            Write-Output -InputObject "Uploading $($FileObj.Path)..."
+            Invoke-RestMethod -Uri $DestUri -Headers @{"accept" = "application/json"; "AccessKey" = $using:DestinationAccessKey } -Method PUT -ContentType "application/octet-stream" -InFile $FileObj.LocalPath | Out-Null
+            
+            # 3. Delete
+            Write-Output -InputObject "Deleting local cache for $($FileObj.Path)..."
+            Remove-Item -Path $FileObj.LocalPath -Force
+        }
+        catch {
+            Write-Error -Message "Failed to transfer $($FileObj.Path): $_"
+        }
     } -ThrottleLimit $ThrottleLimit
 }
 else {
-    Write-Output -InputObject "No files found to download."
+    Write-Output -InputObject "No files found to transfer."
 }
-
-Write-Output -InputObject "Download complete. Starting upload to destination zone: $DestinationZoneName"
-
-# --- Upload Phase ---
-# Recursively find all files in the local cache path and upload them in parallel
-Get-ChildItem -Path $LocalCachePath -Recurse -File | ForEach-Object -Parallel {
-    $File = $_
-    # Calculate relative path for destination
-    # We want the path relative to LocalCachePath
-    $RelativePath = $File.FullName.Substring($using:LocalCachePath.Length).Replace('\', '/')
-    
-    # Ensure relative path starts with /
-    if (-not $RelativePath.StartsWith('/')) {
-        $RelativePath = "/$RelativePath"
-    }
-
-    $Uri = "https://$using:DestinationEndpoint/$using:DestinationZoneName$RelativePath"
-    
-    Write-Output -InputObject "Uploading $($File.Name) to $RelativePath"
-
-    # Upload the file using the Bunny Storage API
-    Invoke-RestMethod -Uri $Uri -Headers @{"accept" = "application/json"; "AccessKey" = $using:DestinationAccessKey } -Method PUT -ContentType "application/octet-stream" -InFile $File.FullName | Out-Null
-
-} -ThrottleLimit $ThrottleLimit
 
 Write-Output -InputObject "Copy operation complete."
