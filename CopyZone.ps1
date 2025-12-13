@@ -145,6 +145,18 @@ do {
 
         $response | ForEach-Object {
             $ItemPath = $_.Path
+            $ZonePrefix = "/$($using:SourceZoneName)"
+
+            # Strip the zone name prefix if present
+            if ($ItemPath.StartsWith($ZonePrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $ItemPath = $ItemPath.Substring($ZonePrefix.Length)
+            }
+
+            # Ensure ItemPath starts with / if it's empty (for root) or doesn't have it
+            if (-not $ItemPath.StartsWith("/")) {
+                $ItemPath = "/$ItemPath"
+            }
+
             $ObjectName = $_.ObjectName
             $FullPath = "$($ItemPath)$($ObjectName)"
             
