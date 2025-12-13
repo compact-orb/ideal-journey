@@ -1,0 +1,50 @@
+name: Copy Bunny Storage Zone
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_zone_name:
+        description: 'Source Bunny Storage Zone Name'
+        required: true
+        type: string
+      destination_zone_name:
+        description: 'Destination Bunny Storage Zone Name'
+        required: true
+        type: string
+      source_endpoint:
+        description: 'Source Endpoint (e.g., storage.bunnycdn.com)'
+        required: false
+        default: 'storage.bunnycdn.com'
+        type: string
+      destination_endpoint:
+        description: 'Destination Endpoint (e.g., storage.bunnycdn.com)'
+        required: false
+        default: 'storage.bunnycdn.com'
+        type: string
+
+jobs:
+  CopyZone:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Cache Directory
+        run: |
+          sudo mkdir --parents /mnt/${{ github.event.repository.name }}
+          sudo chown --recursive $USER:$USER /mnt/${{ github.event.repository.name }}
+
+      - name: Run Copy Script
+        shell: pwsh
+        env:
+          SOURCE_ACCESS_KEY: ${{ secrets.SOURCE_ACCESS_KEY }}
+          DESTINATION_ACCESS_KEY: ${{ secrets.DESTINATION_ACCESS_KEY }}
+        run: |
+          ./CopyZone.ps1 `
+            -SourceZoneName "${{ inputs.source_zone_name }}" `
+            -SourceAccessKey "$env:SOURCE_ACCESS_KEY" `
+            -SourceEndpoint "${{ inputs.source_endpoint }}" `
+            -DestinationZoneName "${{ inputs.destination_zone_name }}" `
+            -DestinationAccessKey "$env:DESTINATION_ACCESS_KEY" `
+            -DestinationEndpoint "${{ inputs.destination_endpoint }}" `
+            -LocalCachePath "/mnt/${{ github.event.repository.name }}"
