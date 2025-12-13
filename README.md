@@ -1,5 +1,7 @@
 # Bunny Storage Zone Copy Utility
 
+[![CodeFactor](https://www.codefactor.io/repository/github/compact-orb/ideal-journey/badge)](https://www.codefactor.io/repository/github/compact-orb/ideal-journey)
+
 A PowerShell script to recursively copy contents between Bunny Storage zones.
 
 ## Features
