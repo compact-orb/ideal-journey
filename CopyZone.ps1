@@ -207,7 +207,7 @@ if ($FilesToDownload.Count -gt 0) {
         $FileObj = $_
         $SourceUri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
         $DestUri = "https://$using:DestinationEndpoint/$using:DestinationZoneName$($FileObj.Path)"
-        $MaxRetries = 3
+        $MaxRetries = 16
 
         for ($Attempt = 1; $Attempt -le $MaxRetries; $Attempt++) {
             try {
