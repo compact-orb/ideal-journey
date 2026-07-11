@@ -26,8 +26,8 @@ jobs:
   CopyZone:
     runs-on: ubuntu-24.04-arm
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v6
 
       - name: Setup Cache Directory
         run: |
