@@ -3,24 +3,25 @@
     Recursively copies contents from a source Bunny Storage zone to a destination zone using a local cache.
 
 .DESCRIPTION
-    This script downloads all files from a source Bunny Storage zone to a local cache directory,
-    and then uploads them to a destination Bunny Storage zone.
-    It uses parallel processing for both download and upload operations.
+    Downloads all files from a source Bunny Storage zone and uploads them to a destination zone.
+    Uses parallel processing for both operations. Access keys are read from environment
+    variables SOURCE_ACCESS_KEY and DESTINATION_ACCESS_KEY.
+
+    When SourcePullZoneUrl is specified, file downloads use the pull zone (unauthenticated)
+    instead of the storage API. Directory listings always use the storage API.
 
 .PARAMETER SourceZoneName
     The name of the source Bunny Storage zone.
 
-.PARAMETER SourceAccessKey
-    The access key for the source Bunny Storage zone.
-
 .PARAMETER SourceEndpoint
     The endpoint for the source Bunny Storage zone. Defaults to storage.bunnycdn.com.
 
+.PARAMETER SourcePullZoneUrl
+    Optional pull zone base URL (e.g. https://myzone.b-cdn.net) for unauthenticated downloads.
+    When set, file downloads use this URL instead of the storage API.
+
 .PARAMETER DestinationZoneName
     The name of the destination Bunny Storage zone.
-
-.PARAMETER DestinationAccessKey
-    The access key for the destination Bunny Storage zone.
 
 .PARAMETER DestinationEndpoint
     The endpoint for the destination Bunny Storage zone. Defaults to storage.bunnycdn.com.
@@ -34,18 +35,27 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$SourceZoneName,
-    [Parameter(Mandatory = $true)]
-    [string]$SourceAccessKey,
     [string]$SourceEndpoint = "storage.bunnycdn.com",
+    [string]$SourcePullZoneUrl,
     [Parameter(Mandatory = $true)]
     [string]$DestinationZoneName,
-    [Parameter(Mandatory = $true)]
-    [string]$DestinationAccessKey,
     [string]$DestinationEndpoint = "storage.bunnycdn.com",
     [Parameter(Mandatory = $true)]
     [string]$LocalCachePath,
     [Int32]$ThrottleLimit = 50
 )
+
+$UsePullZone = -not [string]::IsNullOrWhiteSpace($SourcePullZoneUrl)
+if ($UsePullZone) { $SourcePullZoneUrl = $SourcePullZoneUrl.TrimEnd('/') }
+$SourceAccessKey = $env:SOURCE_ACCESS_KEY
+$DestinationAccessKey = $env:DESTINATION_ACCESS_KEY
+
+if ([string]::IsNullOrWhiteSpace($SourceAccessKey)) {
+    throw "SOURCE_ACCESS_KEY environment variable is required."
+}
+if ([string]::IsNullOrWhiteSpace($DestinationAccessKey)) {
+    throw "DESTINATION_ACCESS_KEY environment variable is required."
+}
 
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $true
@@ -119,7 +129,11 @@ Test-BunnyZoneRead -ZoneName $SourceZoneName -AccessKey $SourceAccessKey -Endpoi
 # Validate Destination Zone (Write)
 Test-BunnyZoneWrite -ZoneName $DestinationZoneName -AccessKey $DestinationAccessKey -Endpoint $DestinationEndpoint
 
-Write-Output -InputObject "Starting download from source zone: $SourceZoneName"
+if ($UsePullZone) {
+    Write-Output -InputObject "Starting download from source: $SourceZoneName (via pull zone $SourcePullZoneUrl)"
+} else {
+    Write-Output -InputObject "Starting download from source: $SourceZoneName"
+}
 
 # --- Download Phase ---
 # Initialize the list of directories to process with the starting path (root)
@@ -131,8 +145,6 @@ do {
     # Process directories in parallel to list their contents
     $Directories = $Directories | ForEach-Object -Parallel {
         $CurrentDir = $_
-        # List the contents of the current directory using the Bunny Storage API
-        # Note: Using SourceEndpoint (Storage API) as requested, not CDN endpoint
         $Uri = "https://$using:SourceEndpoint/$using:SourceZoneName$CurrentDir/"
 
         try {
@@ -202,13 +214,18 @@ do {
 if ($FilesToDownload.Count -gt 0) {
     Write-Output -InputObject "Starting transfer of $($FilesToDownload.Count) files..."
 
-    # ponytail: ConcurrentBag is the laziest thread-safe collection
     $FailedTransfers = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
 
     # 3 retries with exponential backoff, increase if transfers routinely need more
     $FilesToDownload | ForEach-Object -Parallel {
         $FileObj = $_
-        $SourceUri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
+        if ($using:UsePullZone) {
+            $SourceUri = "$($using:SourcePullZoneUrl)$($FileObj.Path)"
+            $DownloadHeaders = @{ accept = '*/*' }
+        } else {
+            $SourceUri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
+            $DownloadHeaders = @{ accept = '*/*'; AccessKey = $using:SourceAccessKey }
+        }
         $DestUri = "https://$using:DestinationEndpoint/$using:DestinationZoneName$($FileObj.Path)"
         $MaxRetries = 16
 
@@ -217,7 +234,7 @@ if ($FilesToDownload.Count -gt 0) {
                 # 1. Download
                 $Suffix = if ($Attempt -gt 1) { " (attempt $Attempt)" } else { "" }
                 Write-Output -InputObject "Downloading $($FileObj.Path)$Suffix..."
-                Invoke-WebRequest -Uri $SourceUri -Headers @{ accept = '*/*'; AccessKey = $using:SourceAccessKey } -OutFile $FileObj.LocalPath
+                Invoke-WebRequest -Uri $SourceUri -Headers $DownloadHeaders -OutFile $FileObj.LocalPath
 
                 # 2. Upload
                 Write-Output -InputObject "Uploading $($FileObj.Path)..."
