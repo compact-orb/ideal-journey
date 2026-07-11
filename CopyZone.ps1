@@ -83,7 +83,7 @@ function Test-BunnyZoneWrite {
     Write-Output -InputObject "Validating write access for zone: $ZoneName..."
 
     $TestFileName = "validation-test-$([guid]::NewGuid()).txt"
-    $TestContent = -join ((65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+    $TestContent = -join ((65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object -Process { [char]$_ })
     $Uri = "https://$Endpoint/$ZoneName/$TestFileName"
     $Headers = @{ "accept" = "application/json"; "AccessKey" = $AccessKey }
 
@@ -143,7 +143,7 @@ do {
             return
         }
 
-        $response | ForEach-Object {
+        $response | ForEach-Object -Process {
             $ItemPath = $_.Path
             $ZonePrefix = "/$($using:SourceZoneName)"
 
@@ -186,7 +186,7 @@ do {
                 }
             }
         }
-    } -ThrottleLimit $ThrottleLimit | ForEach-Object {
+    } -ThrottleLimit $ThrottleLimit | ForEach-Object -Process {
         if ($_.IsDirectory) {
             # Add subdirectory to the list for the next pass
             $_.Path
@@ -201,6 +201,9 @@ do {
 # Transfer files in parallel (Download -> Upload -> Delete)
 if ($FilesToDownload.Count -gt 0) {
     Write-Output -InputObject "Starting transfer of $($FilesToDownload.Count) files..."
+
+    # ponytail: ConcurrentBag is the laziest thread-safe collection
+    $FailedTransfers = [System.Collections.Concurrent.ConcurrentBag[string]]::new()
 
     # 3 retries with exponential backoff, increase if transfers routinely need more
     $FilesToDownload | ForEach-Object -Parallel {
@@ -231,11 +234,19 @@ if ($FilesToDownload.Count -gt 0) {
                     Start-Sleep -Seconds $Delay
                 }
                 else {
-                    Write-Error -Message "Failed to transfer $($FileObj.Path) after $MaxRetries attempts: $_"
+                    Write-Warning -Message "Failed to transfer $($FileObj.Path) after $MaxRetries attempts: $_"
+                    ($using:FailedTransfers).Add($FileObj.Path)
                 }
             }
         }
     } -ThrottleLimit $ThrottleLimit
+
+    if ($FailedTransfers.Count -gt 0) {
+        Write-Output -InputObject "`n--- $($FailedTransfers.Count) failed transfer(s) ---"
+        $FailedTransfers | Sort-Object | ForEach-Object -Process { Write-Output -InputObject "  $_" }
+        Write-Output -InputObject ""
+        exit 1
+    }
 }
 else {
     Write-Output -InputObject "No files found to transfer."
