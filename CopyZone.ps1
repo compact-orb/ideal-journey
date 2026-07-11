@@ -81,7 +81,7 @@ function Test-BunnyZoneWrite {
     )
 
     Write-Output -InputObject "Validating write access for zone: $ZoneName..."
-    
+
     $TestFileName = "validation-test-$([guid]::NewGuid()).txt"
     $TestContent = -join ((65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
     $Uri = "https://$Endpoint/$ZoneName/$TestFileName"
@@ -134,7 +134,7 @@ do {
         # List the contents of the current directory using the Bunny Storage API
         # Note: Using SourceEndpoint (Storage API) as requested, not CDN endpoint
         $Uri = "https://$using:SourceEndpoint/$using:SourceZoneName$CurrentDir/"
-        
+
         try {
             $response = Invoke-RestMethod -StatusCodeVariable httpStatusCode -Uri $Uri -Headers @{ "accept" = "application/json"; "AccessKey" = $using:SourceAccessKey } -Method GET
         }
@@ -201,7 +201,7 @@ do {
 # Transfer files in parallel (Download -> Upload -> Delete)
 if ($FilesToDownload.Count -gt 0) {
     Write-Output -InputObject "Starting transfer of $($FilesToDownload.Count) files..."
-    
+
     # 3 retries with exponential backoff, increase if transfers routinely need more
     $FilesToDownload | ForEach-Object -Parallel {
         $FileObj = $_
