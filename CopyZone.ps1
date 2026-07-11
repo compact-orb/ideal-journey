@@ -202,26 +202,38 @@ do {
 if ($FilesToDownload.Count -gt 0) {
     Write-Output -InputObject "Starting transfer of $($FilesToDownload.Count) files..."
     
+    # 3 retries with exponential backoff, increase if transfers routinely need more
     $FilesToDownload | ForEach-Object -Parallel {
         $FileObj = $_
         $SourceUri = "https://$using:SourceEndpoint/$using:SourceZoneName$($FileObj.Path)"
         $DestUri = "https://$using:DestinationEndpoint/$using:DestinationZoneName$($FileObj.Path)"
-        
-        try {
-            # 1. Download
-            Write-Output -InputObject "Downloading $($FileObj.Path)..."
-            Invoke-WebRequest -Uri $SourceUri -Headers @{ accept = '*/*'; AccessKey = $using:SourceAccessKey } -OutFile $FileObj.LocalPath
-            
-            # 2. Upload
-            Write-Output -InputObject "Uploading $($FileObj.Path)..."
-            Invoke-RestMethod -Uri $DestUri -Headers @{"accept" = "application/json"; "AccessKey" = $using:DestinationAccessKey } -Method PUT -ContentType "application/octet-stream" -InFile $FileObj.LocalPath | Out-Null
-            
-            # 3. Delete
-            Write-Output -InputObject "Deleting local cache for $($FileObj.Path)..."
-            Remove-Item -Path $FileObj.LocalPath -Force
-        }
-        catch {
-            Write-Error -Message "Failed to transfer $($FileObj.Path): $_"
+        $MaxRetries = 3
+
+        for ($Attempt = 1; $Attempt -le $MaxRetries; $Attempt++) {
+            try {
+                # 1. Download
+                $Suffix = if ($Attempt -gt 1) { " (attempt $Attempt)" } else { "" }
+                Write-Output -InputObject "Downloading $($FileObj.Path)$Suffix..."
+                Invoke-WebRequest -Uri $SourceUri -Headers @{ accept = '*/*'; AccessKey = $using:SourceAccessKey } -OutFile $FileObj.LocalPath
+
+                # 2. Upload
+                Write-Output -InputObject "Uploading $($FileObj.Path)..."
+                Invoke-RestMethod -Uri $DestUri -Headers @{"accept" = "application/json"; "AccessKey" = $using:DestinationAccessKey } -Method PUT -ContentType "application/octet-stream" -InFile $FileObj.LocalPath | Out-Null
+
+                # 3. Delete
+                Remove-Item -Path $FileObj.LocalPath -Force
+                break
+            }
+            catch {
+                if ($Attempt -lt $MaxRetries) {
+                    $Delay = [math]::Pow(2, $Attempt)
+                    Write-Warning -Message "Attempt $Attempt failed for $($FileObj.Path): $_ — retrying in ${Delay}s..."
+                    Start-Sleep -Seconds $Delay
+                }
+                else {
+                    Write-Error -Message "Failed to transfer $($FileObj.Path) after $MaxRetries attempts: $_"
+                }
+            }
         }
     } -ThrottleLimit $ThrottleLimit
 }
